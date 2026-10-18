@@ -1,0 +1,87 @@
+#!/bin/sh
+# pi-applet launcher
+#
+# Opens a COSMIC terminal with pi. When pi exits you stay in an interactive
+# zsh in the same window.
+#
+# pi is started directly instead of through `zsh -ic`, so the interactive zsh
+# configuration (~1 s with oh-my-zsh, powerlevel10k and nvm) does not delay
+# startup. `~/.zshenv` is still loaded (via `zsh -c`); the interactive zsh with
+# `~/.zshrc` is only started after pi exits.
+#
+# Customise without rebuilding by exporting one of:
+#   PI_APPLET_TERMINAL   terminal binary        (default: cosmic-term)
+#   PI_APPLET_DIR        working directory      (default: $HOME)
+#   PI_APPLET_PI         pi executable          (default: auto-detected)
+#   PI_APPLET_CMD        full shell command     (default: unset = fast path)
+#                        Setting this restores `zsh -ic "$PI_APPLET_CMD"`
+#                        and therefore loads ~/.zshrc before starting pi.
+set -eu
+
+TERMINAL="${PI_APPLET_TERMINAL:-cosmic-term}"
+WORKDIR="${PI_APPLET_DIR:-$HOME}"
+PI_CMD="${PI_APPLET_CMD:-}"
+
+if ! command -v "$TERMINAL" >/dev/null 2>&1; then
+    echo "pi-applet: terminal '$TERMINAL' not found" >&2
+    exit 1
+fi
+
+# Locate pi without starting a full interactive shell. The panel applet does
+# not inherit nvm's PATH, so check the nvm installation directories as well.
+find_pi() {
+    if [ -n "${PI_APPLET_PI:-}" ]; then
+        if [ -x "$PI_APPLET_PI" ]; then
+            printf '%s\n' "$PI_APPLET_PI"
+            return 0
+        fi
+        echo "pi-applet: PI_APPLET_PI is not executable: $PI_APPLET_PI" >&2
+        return 1
+    fi
+
+    if command -v pi >/dev/null 2>&1; then
+        command -v pi
+        return 0
+    fi
+
+    NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+    if [ -d "$NVM_DIR/versions/node" ]; then
+        PI_CANDIDATE=$(ls -d "$NVM_DIR"/versions/node/*/bin/pi 2>/dev/null | sort -V | tail -n 1 || true)
+        if [ -n "$PI_CANDIDATE" ] && [ -x "$PI_CANDIDATE" ]; then
+            printf '%s\n' "$PI_CANDIDATE"
+            return 0
+        fi
+    fi
+
+    for PI_CANDIDATE in "$HOME/.local/bin/pi" /usr/local/bin/pi /usr/bin/pi; do
+        if [ -x "$PI_CANDIDATE" ]; then
+            printf '%s\n' "$PI_CANDIDATE"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+if [ -z "$PI_CMD" ] && PI_BIN=$(find_pi); then
+    # pi installed through npm/nvm is a `#!/usr/bin/env node` script, so make
+    # the matching node available in PATH.
+    PI_BIN_DIR=$(dirname "$PI_BIN")
+    export PI_APPLET_PI_BIN="$PI_BIN"
+    export PI_APPLET_PI_DIR="$PI_BIN_DIR"
+
+    # Use zsh (not sh) so ~/.zshenv is still loaded. It is cheap (a few ms)
+    # and typically provides tokens, JAVA_HOME and PATH additions. Only the
+    # expensive interactive ~/.zshrc is skipped.
+    exec "$TERMINAL" -w "$WORKDIR" -- /bin/zsh -c '
+        PATH="$PI_APPLET_PI_DIR${PATH:+:$PATH}"
+        export PATH
+        "$PI_APPLET_PI_BIN"
+        exec /bin/zsh -i
+    '
+fi
+
+# Fallback for pi setups that only exist after ~/.zshrc has been sourced
+# (or when PI_APPLET_CMD is set explicitly).
+PI_CMD="${PI_CMD:-pi; exec /bin/zsh -i}"
+exec "$TERMINAL" -w "$WORKDIR" -- /bin/zsh -ic "$PI_CMD"

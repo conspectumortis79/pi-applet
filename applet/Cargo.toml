@@ -1,0 +1,21 @@
+[package]
+name = "pi-applet"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "COSMIC panel applet that opens a zsh terminal running pi"
+repository = "https://github.com/pmichailidis/pi-applet"
+publish = false
+
+[dependencies]
+libcosmic = { git = "https://github.com/pop-os/libcosmic.git", rev = "5a8bd9482a35ae94c1e54edf77b331c6b970f170", features = [
+    "applet",
+    "applet-token",
+    "tokio",
+    "wayland",
+    "winit",
+] }
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
